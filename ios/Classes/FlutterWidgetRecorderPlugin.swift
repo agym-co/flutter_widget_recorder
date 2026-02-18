@@ -6,6 +6,20 @@ import CoreMedia
 import CoreImage
 
 public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
+    private struct EncoderConfig: Equatable {
+        let targetFps: Int
+        let bitrateBps: Int
+        let iFrameIntervalSec: Int
+        let bitrateMode: String
+
+        static let `default` = EncoderConfig(
+            targetFps: 30,
+            bitrateBps: 2_000_000,
+            iFrameIntervalSec: 1,
+            bitrateMode: "cbr"
+        )
+    }
+
     // MARK: — properties
     private var videoWriter: AVAssetWriter?
     private var videoWriterInput: AVAssetWriterInput?
@@ -19,6 +33,7 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
     private var frameHeight = 0
     private var firstTimestamp: CMTime?
     private let ciContext = CIContext()
+    private var encoderConfig: EncoderConfig = .default
 
     // MARK: — registration
     public static func register(with registrar: FlutterPluginRegistrar) {
@@ -49,6 +64,12 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
             // align to 16
             pixelWidth  = ((unW + 15)/16)*16
             pixelHeight = ((unH + 15)/16)*16
+            encoderConfig = buildEncoderConfig(
+                targetFps: (args["targetFps"] as? NSNumber)?.intValue,
+                bitrateBps: (args["bitrateBps"] as? NSNumber)?.intValue,
+                iFrameIntervalSec: (args["iFrameIntervalSec"] as? NSNumber)?.intValue,
+                bitrateMode: args["bitrateMode"] as? String
+            )
             startRecording(name: name, result: result)
 
         case "pushFrame":
@@ -67,6 +88,57 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
         default:
             result(FlutterMethodNotImplemented)
         }
+    }
+
+    private func clamp(_ value: Int, min: Int, max: Int) -> Int {
+        Swift.max(min, Swift.min(value, max))
+    }
+
+    private func buildEncoderConfig(
+        targetFps: Int?,
+        bitrateBps: Int?,
+        iFrameIntervalSec: Int?,
+        bitrateMode: String?
+    ) -> EncoderConfig {
+        let normalizedMode = (bitrateMode ?? EncoderConfig.default.bitrateMode).lowercased()
+        let safeMode = (normalizedMode == "vbr" || normalizedMode == "cbr")
+            ? normalizedMode
+            : EncoderConfig.default.bitrateMode
+
+        return EncoderConfig(
+            targetFps: clamp(targetFps ?? EncoderConfig.default.targetFps, min: 1, max: 120),
+            bitrateBps: clamp(bitrateBps ?? EncoderConfig.default.bitrateBps, min: 100_000, max: 100_000_000),
+            iFrameIntervalSec: clamp(iFrameIntervalSec ?? EncoderConfig.default.iFrameIntervalSec, min: 1, max: 10),
+            bitrateMode: safeMode
+        )
+    }
+
+    private func makeVideoSettings() -> [String: Any] {
+        let maxKeyFrameInterval = Swift.max(1, encoderConfig.targetFps * encoderConfig.iFrameIntervalSec)
+        let compressionProperties: [String: Any] = [
+            AVVideoAverageBitRateKey: encoderConfig.bitrateBps,
+            AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+            AVVideoMaxKeyFrameIntervalKey: maxKeyFrameInterval,
+            AVVideoExpectedSourceFrameRateKey: encoderConfig.targetFps,
+            AVVideoAllowFrameReorderingKey: false
+        ]
+
+        if encoderConfig.bitrateMode == "vbr" {
+            NSLog("[flutter_widget_recorder] iOS AVAssetWriter does not expose explicit CBR/VBR mode control. Requested bitrateMode=vbr is accepted but not directly applied.")
+        }
+
+        return [
+            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoWidthKey: pixelWidth,
+            AVVideoHeightKey: pixelHeight,
+            AVVideoCompressionPropertiesKey: compressionProperties
+        ]
+    }
+
+    private func logEffectiveEncoderSettings() {
+        NSLog(
+            "[flutter_widget_recorder] Encoder config iOS: width=\(pixelWidth), height=\(pixelHeight), fps=\(encoderConfig.targetFps), bitrateBps=\(encoderConfig.bitrateBps), iFrameIntervalSec=\(encoderConfig.iFrameIntervalSec), bitrateMode=\(encoderConfig.bitrateMode)"
+        )
     }
 
     // MARK: — startRecording
@@ -99,18 +171,7 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
             return result(FlutterError(code: "WRITER_ERROR", message: "Cannot create AVAssetWriter", details: error.localizedDescription))
         }
 
-        // H264 settings with more specific configuration
-        let videoSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: pixelWidth,
-            AVVideoHeightKey: pixelHeight,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 2_000_000,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-                AVVideoMaxKeyFrameIntervalKey: 30,
-                AVVideoAllowFrameReorderingKey: false
-            ]
-        ]
+        let videoSettings = makeVideoSettings()
 
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         input.expectsMediaDataInRealTime = true
@@ -139,6 +200,7 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
         // start
         writer.startWriting()
         writer.startSession(atSourceTime: .zero)
+        logEffectiveEncoderSettings()
 
         result(true)
     }
@@ -181,18 +243,7 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
                 return result(FlutterError(code: "WRITER_ERROR", message: "Cannot create AVAssetWriter", details: error.localizedDescription))
             }
 
-            // H264 settings with more specific configuration
-            let videoSettings: [String: Any] = [
-                AVVideoCodecKey: AVVideoCodecType.h264,
-                AVVideoWidthKey: pixelWidth,
-                AVVideoHeightKey: pixelHeight,
-                AVVideoCompressionPropertiesKey: [
-                    AVVideoAverageBitRateKey: 2_000_000,
-                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-                    AVVideoMaxKeyFrameIntervalKey: 30,
-                    AVVideoAllowFrameReorderingKey: false
-                ]
-            ]
+            let videoSettings = self.makeVideoSettings()
 
             let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
             input.expectsMediaDataInRealTime = true
@@ -222,6 +273,7 @@ public class FlutterWidgetRecorderPlugin: NSObject, FlutterPlugin {
             writer.startWriting()
             writer.startSession(atSourceTime: .zero)
             firstTimestamp = timestamp
+            self.logEffectiveEncoderSettings()
         }
 
         guard let writer = videoWriter,

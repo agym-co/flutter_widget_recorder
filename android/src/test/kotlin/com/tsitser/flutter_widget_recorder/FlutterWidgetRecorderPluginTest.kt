@@ -1,27 +1,65 @@
 package com.tsitser.flutter_widget_recorder
 
-import io.flutter.plugin.common.MethodCall
-import io.flutter.plugin.common.MethodChannel
+import android.media.MediaCodecInfo
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.Test
-import org.mockito.Mockito
-
-/*
- * This demonstrates a simple unit test of the Kotlin portion of this plugin's implementation.
- *
- * Once you have built the plugin's example app, you can run these tests from the command
- * line by running `./gradlew testDebugUnitTest` in the `example/android/` directory, or
- * you can run them directly from IDEs that support JUnit such as Android Studio.
- */
 
 internal class FlutterWidgetRecorderPluginTest {
-  @Test
-  fun onMethodCall_getPlatformVersion_returnsExpectedValue() {
-    val plugin = FlutterWidgetRecorderPlugin()
+    @Test
+    fun parseBitrateMode_supportsCbrAndVbr() {
+        assertEquals(
+            MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR,
+            FlutterWidgetRecorderPlugin.parseBitrateMode("cbr"),
+        )
+        assertEquals(
+            MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR,
+            FlutterWidgetRecorderPlugin.parseBitrateMode("vbr"),
+        )
+        assertEquals(
+            MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR,
+            FlutterWidgetRecorderPlugin.parseBitrateMode("VBR"),
+        )
+        assertNull(FlutterWidgetRecorderPlugin.parseBitrateMode("unsupported"))
+        assertNull(FlutterWidgetRecorderPlugin.parseBitrateMode(null))
+    }
 
-    val call = MethodCall("getPlatformVersion", null)
-    val mockResult: MethodChannel.Result = Mockito.mock(MethodChannel.Result::class.java)
-    plugin.onMethodCall(call, mockResult)
+    @Test
+    fun buildEncoderConfig_usesDefaultsWhenMissing() {
+        val config = FlutterWidgetRecorderPlugin.buildEncoderConfig(
+            targetFps = null,
+            bitrateBps = null,
+            iFrameIntervalSec = null,
+            bitrateMode = null,
+        )
 
-    Mockito.verify(mockResult).success("Android " + android.os.Build.VERSION.RELEASE)
-  }
+        assertEquals(FlutterWidgetRecorderPlugin.DEFAULT_TARGET_FPS, config.targetFps)
+        assertEquals(FlutterWidgetRecorderPlugin.DEFAULT_BITRATE_BPS, config.bitrateBps)
+        assertEquals(
+            FlutterWidgetRecorderPlugin.DEFAULT_I_FRAME_INTERVAL_SEC,
+            config.iFrameIntervalSec,
+        )
+        assertEquals(
+            MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR,
+            config.bitrateMode,
+        )
+    }
+
+    @Test
+    fun buildEncoderConfig_clampsOutOfRangeValues() {
+        val config = FlutterWidgetRecorderPlugin.buildEncoderConfig(
+            targetFps = 1000,
+            bitrateBps = 1,
+            iFrameIntervalSec = -10,
+            bitrateMode = "vbr",
+        )
+
+        assertEquals(FlutterWidgetRecorderPlugin.MAX_TARGET_FPS, config.targetFps)
+        assertEquals(FlutterWidgetRecorderPlugin.MIN_BITRATE_BPS, config.bitrateBps)
+        assertEquals(FlutterWidgetRecorderPlugin.MIN_I_FRAME_INTERVAL_SEC, config.iFrameIntervalSec)
+        assertEquals(
+            MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR,
+            config.bitrateMode,
+        )
+    }
 }

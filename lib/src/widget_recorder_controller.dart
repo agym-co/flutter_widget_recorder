@@ -6,6 +6,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'flutter_widget_recorder.dart';
+import 'recording_options.dart';
 
 /// Controller for recording widget
 class WidgetRecorderController with ChangeNotifier {
@@ -48,6 +49,10 @@ class WidgetRecorderController with ChangeNotifier {
   Future<void> startRecording(
     String name, {
     required double pixelRatio,
+    int? targetFps,
+    int? bitrateBps,
+    int? iFrameIntervalSec,
+    RecorderBitrateMode? bitrateMode,
   }) async {
     if (_isRecording) return;
     final ctx = repaintKey.currentContext;
@@ -60,6 +65,10 @@ class WidgetRecorderController with ChangeNotifier {
       width: size.width.toInt(),
       height: size.height.toInt(),
       pixelRatio: pixelRatio,
+      targetFps: targetFps,
+      bitrateBps: bitrateBps,
+      iFrameIntervalSec: iFrameIntervalSec,
+      bitrateMode: bitrateMode,
     );
     if (ok) {
       _isRecording = true;

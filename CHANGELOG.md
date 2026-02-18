@@ -1,5 +1,20 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added optional encoder parameters to `startRecording`: `targetFps`, `bitrateBps`, `iFrameIntervalSec`, and `bitrateMode` (`cbr`/`vbr`).
+- Added `RecorderBitrateMode` and documented default encoder values for backward-compatible usage.
+- Added Android unit coverage for bitrate mode parsing and encoder parameter normalization.
+
+### Changed
+
+- Android encoder now uses method-channel values instead of hardcoded frame rate/bitrate/keyframe settings.
+- Android adds clamping, capability checks for bitrate mode, and startup logging of effective encoder settings.
+- Android now retries with safe defaults when requested encoder configuration fails.
+- iOS now accepts the same optional encoder parameters and applies supported fields to AVAssetWriter compression settings.
+
 ## [0.1.0] - 2025-06-13
 
 ### Added

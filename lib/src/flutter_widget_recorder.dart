@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'flutter_widget_recorder_platform_interface.dart';
+import 'recording_options.dart';
 
 class FlutterWidgetRecorder {
   Future<bool> startRecording({
@@ -8,12 +9,20 @@ class FlutterWidgetRecorder {
     required int width,
     required int height,
     required double pixelRatio,
+    int? targetFps,
+    int? bitrateBps,
+    int? iFrameIntervalSec,
+    RecorderBitrateMode? bitrateMode,
   }) {
     return FlutterWidgetRecorderPlatform.instance.startRecording(
       name: name,
       width: width,
       height: height,
       pixelRatio: pixelRatio,
+      targetFps: targetFps,
+      bitrateBps: bitrateBps,
+      iFrameIntervalSec: iFrameIntervalSec,
+      bitrateMode: bitrateMode,
     );
   }
 

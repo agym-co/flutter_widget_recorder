@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:plugin_platform_interface/plugin_platform_interface.dart';
 
 import 'flutter_widget_recorder_method_channel.dart';
+import 'recording_options.dart';
 
 /// The platform interface for the FlutterWidgetRecorder plugin.
 ///
@@ -44,6 +45,10 @@ abstract class FlutterWidgetRecorderPlatform extends PlatformInterface {
     required int width,
     required int height,
     required double pixelRatio,
+    int? targetFps,
+    int? bitrateBps,
+    int? iFrameIntervalSec,
+    RecorderBitrateMode? bitrateMode,
   });
 
   /// Pushes a frame to the recording.
