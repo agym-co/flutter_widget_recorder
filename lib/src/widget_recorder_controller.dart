@@ -14,10 +14,20 @@ class WidgetRecorderController with ChangeNotifier {
   final Duration _frameInterval;
   final bool isWithTicker;
 
+  static int _resolveCaptureFps(int? captureFps, int? targetFps) {
+    final int fps =
+        captureFps ?? targetFps ?? RecorderEncodingDefaults.encoderFps;
+    return fps > 0 ? fps : RecorderEncodingDefaults.encoderFps;
+  }
+
   WidgetRecorderController({
-    required int targetFps,
+    int? captureFps,
+    @Deprecated('Use captureFps instead.') int? targetFps,
     this.isWithTicker = false,
-  })  : _frameInterval = Duration(milliseconds: (1000 / targetFps).floor()),
+  })  : _frameInterval = Duration(
+          milliseconds:
+              (1000 / _resolveCaptureFps(captureFps, targetFps)).floor(),
+        ),
         _recorder = FlutterWidgetRecorder();
 
   /// Global key to the widget to be recorded.
@@ -49,7 +59,8 @@ class WidgetRecorderController with ChangeNotifier {
   Future<void> startRecording(
     String name, {
     required double pixelRatio,
-    int? targetFps,
+    int? encoderFps,
+    @Deprecated('Use encoderFps instead.') int? targetFps,
     int? bitrateBps,
     int? iFrameIntervalSec,
     RecorderBitrateMode? bitrateMode,
@@ -60,12 +71,13 @@ class WidgetRecorderController with ChangeNotifier {
     final size = ctx.size;
     if (size == null) return;
 
+    final int? effectiveEncoderFps = encoderFps ?? targetFps;
     final ok = await _recorder.startRecording(
       name: name,
       width: size.width.toInt(),
       height: size.height.toInt(),
       pixelRatio: pixelRatio,
-      targetFps: targetFps,
+      encoderFps: effectiveEncoderFps,
       bitrateBps: bitrateBps,
       iFrameIntervalSec: iFrameIntervalSec,
       bitrateMode: bitrateMode,

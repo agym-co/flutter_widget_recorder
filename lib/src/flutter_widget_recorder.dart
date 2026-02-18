@@ -9,17 +9,19 @@ class FlutterWidgetRecorder {
     required int width,
     required int height,
     required double pixelRatio,
-    int? targetFps,
+    int? encoderFps,
+    @Deprecated('Use encoderFps instead.') int? targetFps,
     int? bitrateBps,
     int? iFrameIntervalSec,
     RecorderBitrateMode? bitrateMode,
   }) {
+    final int? effectiveEncoderFps = encoderFps ?? targetFps;
     return FlutterWidgetRecorderPlatform.instance.startRecording(
       name: name,
       width: width,
       height: height,
       pixelRatio: pixelRatio,
-      targetFps: targetFps,
+      encoderFps: effectiveEncoderFps,
       bitrateBps: bitrateBps,
       iFrameIntervalSec: iFrameIntervalSec,
       bitrateMode: bitrateMode,

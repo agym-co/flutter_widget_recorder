@@ -25,7 +25,7 @@ class ExampleScreen extends StatefulWidget {
 
 class _ExampleScreenState extends State<ExampleScreen> {
   final WidgetRecorderController _controller = WidgetRecorderController(
-    targetFps: 30,
+    captureFps: 30,
     isWithTicker: true,
   );
 

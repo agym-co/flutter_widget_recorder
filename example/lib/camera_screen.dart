@@ -26,7 +26,7 @@ class _BodyState extends State<_Body> {
   CameraController? _cameraController;
 
   final WidgetRecorderController _controller = WidgetRecorderController(
-    targetFps: 30,
+    captureFps: 30,
     isWithTicker: false,
   );
 

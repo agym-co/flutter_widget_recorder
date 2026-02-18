@@ -16,18 +16,20 @@ class MethodChannelFlutterWidgetRecorder extends FlutterWidgetRecorderPlatform {
     required int width,
     required int height,
     required double pixelRatio,
-    int? targetFps,
+    int? encoderFps,
+    @Deprecated('Use encoderFps instead.') int? targetFps,
     int? bitrateBps,
     int? iFrameIntervalSec,
     RecorderBitrateMode? bitrateMode,
   }) async {
     const String methodName = 'startRecording';
+    final int? effectiveEncoderFps = encoderFps ?? targetFps;
     final Map<String, dynamic> args = {
       'name': name,
       'width': width,
       'height': height,
       'pixelRatio': pixelRatio,
-      if (targetFps != null) 'targetFps': targetFps,
+      if (effectiveEncoderFps != null) 'targetFps': effectiveEncoderFps,
       if (bitrateBps != null) 'bitrateBps': bitrateBps,
       if (iFrameIntervalSec != null) 'iFrameIntervalSec': iFrameIntervalSec,
       if (bitrateMode != null) 'bitrateMode': bitrateMode.name,

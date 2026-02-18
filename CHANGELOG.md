@@ -4,7 +4,7 @@
 
 ### Added
 
-- Added optional encoder parameters to `startRecording`: `targetFps`, `bitrateBps`, `iFrameIntervalSec`, and `bitrateMode` (`cbr`/`vbr`).
+- Added optional encoder parameters to `startRecording`: `encoderFps`, `bitrateBps`, `iFrameIntervalSec`, and `bitrateMode` (`cbr`/`vbr`), with deprecated `targetFps` alias support.
 - Added `RecorderBitrateMode` and documented default encoder values for backward-compatible usage.
 - Added Android unit coverage for bitrate mode parsing and encoder parameter normalization.
 
@@ -14,6 +14,7 @@
 - Android adds clamping, capability checks for bitrate mode, and startup logging of effective encoder settings.
 - Android now retries with safe defaults when requested encoder configuration fails.
 - iOS now accepts the same optional encoder parameters and applies supported fields to AVAssetWriter compression settings.
+- Clarified FPS naming in Dart API: `captureFps` for frame capture cadence and `encoderFps` for native encoder settings, while keeping deprecated `targetFps` aliases for compatibility.
 
 ## [0.1.0] - 2025-06-13
 

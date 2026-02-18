@@ -37,7 +37,7 @@ First, create a controller in your StatefulWidget:
 ```dart
 class _MyWidgetState extends State<MyWidget> {
   final WidgetRecorderController _controller = WidgetRecorderController(
-    targetFps: 30, // Optional: Set target FPS
+    captureFps: 30, // Optional: frame capture FPS
   );
 
   @override
@@ -83,7 +83,7 @@ Optional encoder tuning params are also supported:
 await _controller.startRecording(
   'my_video',
   pixelRatio: MediaQuery.devicePixelRatioOf(context),
-  targetFps: 60,
+  encoderFps: 60,
   bitrateBps: 6_000_000,
   iFrameIntervalSec: 1,
   bitrateMode: RecorderBitrateMode.vbr,
@@ -92,10 +92,15 @@ await _controller.startRecording(
 
 Defaults used by the plugin when params are omitted:
 
-- `targetFps`: `30`
+- `encoderFps`: `30`
 - `bitrateBps`: `2_000_000`
 - `iFrameIntervalSec`: `1`
 - `bitrateMode`: `RecorderBitrateMode.cbr`
+
+Naming note:
+- `captureFps` (controller constructor) controls Flutter frame capture cadence.
+- `encoderFps` (startRecording) controls native encoder FPS settings.
+- Deprecated aliases `targetFps` are still supported for backward compatibility.
 
 Migration note: existing API usage remains valid. If you do not pass these optional fields, behavior stays backward-compatible.
 
@@ -115,14 +120,14 @@ Check out the [example](example/lib/main.dart) for a complete implementation tha
 - **Pixel Alignment:** iOS H.264 video requires frame sizes to be multiples of 16. The plugin automatically pads frames as needed. Extra space is filled with black pixels.
 - **Automatic Adjustment:** The widget automatically adjusts (pads) the recorded area to the nearest multiple of 16 pixels to ensure compatibility with the video codec. You do not need to manually align your widget size.
 - **Padding:** If your widget size is not a multiple of 16, the output video will have paddings on the right and/or bottom.
-- **Encoder Params:** `targetFps`, `bitrateBps`, and `iFrameIntervalSec` are mapped to AVAssetWriter compression settings. `bitrateMode` is accepted for API parity but ignored on iOS (safe no-op).
+- **Encoder Params:** `encoderFps`, `bitrateBps`, and `iFrameIntervalSec` are mapped to AVAssetWriter compression settings. `bitrateMode` is accepted for API parity but ignored on iOS (safe no-op).
 
 ### Android
 
 - **Pixel Alignment:** Similar to iOS, Android H.264 video requires frame sizes to be multiples of 16. The plugin handles this automatically.
 - **Tunable Encoding:** Android encoder settings are configurable via `startRecording(...)`.
 - **Recommended Android Ranges:**
-  - `targetFps`: 24-60
+  - `encoderFps`: 24-60
   - `bitrateBps`: 2_000_000-10_000_000 (increase for high resolution content)
   - `iFrameIntervalSec`: 1-2
   - `bitrateMode`: `RecorderBitrateMode.cbr` for stability, `RecorderBitrateMode.vbr` for better quality/size tradeoff
@@ -140,7 +145,7 @@ Check out the [example](example/lib/main.dart) for a complete implementation tha
 - For high resolution + high fps recordings, start with moderate settings and scale gradually:
   - 1080p @ 30fps: try `4_000_000` to `8_000_000` bitrate
   - 1080p @ 60fps: try `8_000_000` to `16_000_000` bitrate
-  - If frames drop or encoding errors occur, reduce `targetFps` and/or `bitrateBps`
+  - If frames drop or encoding errors occur, reduce `encoderFps` and/or `bitrateBps`
 - For more details, see the [CHANGELOG.md](CHANGELOG.md).
 
 ## License
