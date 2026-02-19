@@ -12,22 +12,14 @@ import 'recording_options.dart';
 class WidgetRecorderController with ChangeNotifier {
   final FlutterWidgetRecorder _recorder;
   final Duration _frameInterval;
+  final int _captureFps;
   final bool isWithTicker;
 
-  static int _resolveCaptureFps(int? captureFps, int? targetFps) {
-    final int fps =
-        captureFps ?? targetFps ?? RecorderEncodingDefaults.encoderFps;
-    return fps > 0 ? fps : RecorderEncodingDefaults.encoderFps;
-  }
-
   WidgetRecorderController({
-    int? captureFps,
-    @Deprecated('Use captureFps instead.') int? targetFps,
+    required int captureFps,
     this.isWithTicker = false,
-  })  : _frameInterval = Duration(
-          milliseconds:
-              (1000 / _resolveCaptureFps(captureFps, targetFps)).floor(),
-        ),
+  })  : _captureFps = captureFps,
+        _frameInterval = Duration(milliseconds: (1000 / captureFps).floor()),
         _recorder = FlutterWidgetRecorder();
 
   /// Global key to the widget to be recorded.
@@ -45,6 +37,9 @@ class WidgetRecorderController with ChangeNotifier {
   /// Ticker for recording. Sometimes it's more accurate than timer.
   Ticker? _ticker;
 
+  /// Prevents overlapping frame captures when the pipeline can't keep up.
+  bool _isCapturingFrame = false;
+
   /// Path to the recorded video.
   String? _path;
 
@@ -60,7 +55,6 @@ class WidgetRecorderController with ChangeNotifier {
     String name, {
     required double pixelRatio,
     int? encoderFps,
-    @Deprecated('Use encoderFps instead.') int? targetFps,
     int? bitrateBps,
     int? iFrameIntervalSec,
     RecorderBitrateMode? bitrateMode,
@@ -71,13 +65,12 @@ class WidgetRecorderController with ChangeNotifier {
     final size = ctx.size;
     if (size == null) return;
 
-    final int? effectiveEncoderFps = encoderFps ?? targetFps;
     final ok = await _recorder.startRecording(
       name: name,
       width: size.width.toInt(),
       height: size.height.toInt(),
       pixelRatio: pixelRatio,
-      encoderFps: effectiveEncoderFps,
+      encoderFps: encoderFps ?? _captureFps,
       bitrateBps: bitrateBps,
       iFrameIntervalSec: iFrameIntervalSec,
       bitrateMode: bitrateMode,
@@ -105,16 +98,22 @@ class WidgetRecorderController with ChangeNotifier {
     _timer?.cancel();
     _ticker?.stop();
     _isRecording = false;
+    _isCapturingFrame = false;
     _path = await _recorder.stopRecording();
     notifyListeners();
   }
 
-  /// Capture frame and send to native.
+  /// Capture frame and send to native. Skips if the previous capture is still
+  /// in flight to prevent pipeline backup.
   Future<void> _captureFrame(double pixelRatio) async {
+    if (_isCapturingFrame) return;
+    _isCapturingFrame = true;
     try {
       final boundary = repaintKey.currentContext!.findRenderObject()
           as RenderRepaintBoundary;
       final image = await boundary.toImage(pixelRatio: pixelRatio);
+      final imageWidth = image.width;
+      final imageHeight = image.height;
       final byteData =
           await image.toByteData(format: ui.ImageByteFormat.rawRgba);
       image.dispose();
@@ -125,12 +124,14 @@ class WidgetRecorderController with ChangeNotifier {
 
       await _recorder.pushFrame(
         frame: pixels,
-        width: image.width,
-        height: image.height,
+        width: imageWidth,
+        height: imageHeight,
         timestamp: timestamp,
       );
     } catch (e) {
       debugPrint('Error capturing frame: $e');
+    } finally {
+      _isCapturingFrame = false;
     }
   }
 

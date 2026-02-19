@@ -26,7 +26,6 @@ class MockFlutterWidgetRecorderPlatform
     required int height,
     required double pixelRatio,
     int? encoderFps,
-    @Deprecated('Use encoderFps instead.') int? targetFps,
     int? bitrateBps,
     int? iFrameIntervalSec,
     RecorderBitrateMode? bitrateMode,

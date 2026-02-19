@@ -1,5 +1,3 @@
-// ignore_for_file: deprecated_member_use_from_same_package
-
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_widget_recorder/src/flutter_widget_recorder_method_channel.dart';
@@ -41,7 +39,8 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
-  test('startRecording', () async {
+  test('startRecording without optional params omits them from payload',
+      () async {
     expect(
       await platform.startRecording(
         name: 'test',
@@ -80,24 +79,6 @@ void main() {
       'bitrateBps': 4000000,
       'iFrameIntervalSec': 2,
       'bitrateMode': 'vbr',
-    });
-  });
-
-  test('startRecording still supports deprecated targetFps alias', () async {
-    await platform.startRecording(
-      name: 'test',
-      width: 100,
-      height: 100,
-      pixelRatio: 1.0,
-      targetFps: 24,
-    );
-
-    expect(lastCall?.arguments, {
-      'name': 'test',
-      'width': 100,
-      'height': 100,
-      'pixelRatio': 1.0,
-      'targetFps': 24,
     });
   });
 

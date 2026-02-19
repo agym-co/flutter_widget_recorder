@@ -97,12 +97,9 @@ Defaults used by the plugin when params are omitted:
 - `iFrameIntervalSec`: `1`
 - `bitrateMode`: `RecorderBitrateMode.cbr`
 
-Naming note:
-- `captureFps` (controller constructor) controls Flutter frame capture cadence.
-- `encoderFps` (startRecording) controls native encoder FPS settings.
-- Deprecated aliases `targetFps` are still supported for backward compatibility.
-
-Migration note: existing API usage remains valid. If you do not pass these optional fields, behavior stays backward-compatible.
+Note:
+- `captureFps` (controller constructor) controls how often Flutter captures frames.
+- `encoderFps` (startRecording) controls the native encoder frame rate setting.
 
 ## Example
 

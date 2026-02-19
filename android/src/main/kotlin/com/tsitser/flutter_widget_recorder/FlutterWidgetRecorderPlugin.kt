@@ -3,6 +3,9 @@ package com.tsitser.flutter_widget_recorder
 import android.content.Context
 import android.media.*
 import android.os.Build
+import android.os.Handler
+import android.os.HandlerThread
+import android.os.Looper
 import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
@@ -12,7 +15,6 @@ import io.flutter.plugin.common.MethodChannel.Result
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** FlutterWidgetRecorderPlugin */
 class FlutterWidgetRecorderPlugin: FlutterPlugin, MethodCallHandler {
     internal data class EncoderConfig(
         val targetFps: Int,
@@ -96,6 +98,12 @@ class FlutterWidgetRecorderPlugin: FlutterPlugin, MethodCallHandler {
     private lateinit var context: Context
     private var effectiveEncoderConfig: EncoderConfig? = null
 
+    private var encoderThread: HandlerThread? = null
+    private var encoderHandler: Handler? = null
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
+    private val isProcessingFrame = AtomicBoolean(false)
+    private var nv12Buffer: ByteArray? = null
+
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_widget_recorder")
         channel.setMethodCallHandler(this)
@@ -176,8 +184,18 @@ class FlutterWidgetRecorderPlugin: FlutterPlugin, MethodCallHandler {
 
             mediaMuxer = MediaMuxer(outputFile?.absolutePath ?: "", MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             videoTrackIndex = -1
-            isRecording.set(true)
             firstTimestamp = 0
+            isProcessingFrame.set(false)
+
+            nv12Buffer = ByteArray(pixelWidth * pixelHeight * 3 / 2).also { buf ->
+                val yPlaneSize = pixelWidth * pixelHeight
+                buf.fill(128.toByte(), yPlaneSize, buf.size)
+            }
+
+            encoderThread = HandlerThread("WidgetRecorderEncoder").also { it.start() }
+            encoderHandler = Handler(encoderThread!!.looper)
+
+            isRecording.set(true)
             logEffectiveEncoderSettings()
 
             result.success(true)
@@ -275,6 +293,7 @@ class FlutterWidgetRecorderPlugin: FlutterPlugin, MethodCallHandler {
         Log.i(
             TAG,
             "Encoder config: width=$pixelWidth, height=$pixelHeight, " +
+                "frameWidth=$frameWidth, frameHeight=$frameHeight, " +
                 "fps=${config.targetFps}, bitrateBps=${config.bitrateBps}, " +
                 "iFrameIntervalSec=${config.iFrameIntervalSec}, bitrateMode=${config.bitrateModeName()}",
         )
@@ -286,62 +305,82 @@ class FlutterWidgetRecorderPlugin: FlutterPlugin, MethodCallHandler {
             return
         }
 
-        try {
-            val codec = mediaCodec ?: throw IllegalStateException("MediaCodec not initialized")
-            val muxer = mediaMuxer ?: throw IllegalStateException("MediaMuxer not initialized")
+        if (!isProcessingFrame.compareAndSet(false, true)) {
+            result.success(true)
+            return
+        }
 
-            // Устанавливаем первый timestamp
-            if (firstTimestamp == 0L) {
-                firstTimestamp = timestampMs
+        encoderHandler?.post {
+            try {
+                encodeFrame(pixels, timestampMs)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error encoding frame", e)
+            } finally {
+                isProcessingFrame.set(false)
             }
+        }
 
-            val yuvData = convertRGBAtoNV12(pixels, frameWidth, frameHeight)
+        result.success(true)
+    }
 
-            val inputBufferIndex = codec.dequeueInputBuffer(10000)
-            if (inputBufferIndex >= 0) {
-                val inputBuffer = codec.getInputBuffer(inputBufferIndex)
-                inputBuffer?.clear()
-                inputBuffer?.put(yuvData)
-                
-                val presentationTimeUs = (timestampMs - firstTimestamp) * 1000
-                codec.queueInputBuffer(inputBufferIndex, 0, yuvData.size, presentationTimeUs, 0)
-            }
+    private fun encodeFrame(pixels: ByteArray, timestampMs: Long) {
+        val codec = mediaCodec ?: return
+        val muxer = mediaMuxer ?: return
+        val nv12 = nv12Buffer ?: return
 
-            val bufferInfo = MediaCodec.BufferInfo()
-            var outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
+        if (firstTimestamp == 0L) {
+            firstTimestamp = timestampMs
+        }
 
-            while (outputBufferIndex >= 0 || outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+        convertRGBAtoNV12(pixels, frameWidth, frameHeight, pixelWidth, pixelHeight, nv12)
+
+        val inputBufferIndex = codec.dequeueInputBuffer(10000)
+        if (inputBufferIndex >= 0) {
+            val inputBuffer = codec.getInputBuffer(inputBufferIndex)
+            inputBuffer?.clear()
+            inputBuffer?.put(nv12, 0, nv12.size)
+            val presentationTimeUs = (timestampMs - firstTimestamp) * 1000
+            codec.queueInputBuffer(inputBufferIndex, 0, nv12.size, presentationTimeUs, 0)
+        }
+
+        drainOutputBuffers(codec, muxer, false)
+    }
+
+    private fun drainOutputBuffers(codec: MediaCodec, muxer: MediaMuxer, endOfStream: Boolean) {
+        val bufferInfo = MediaCodec.BufferInfo()
+        val timeoutUs: Long = if (endOfStream) 10000 else 0
+
+        while (true) {
+            val index = codec.dequeueOutputBuffer(bufferInfo, timeoutUs)
+
+            when {
+                index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                     if (videoTrackIndex < 0) {
-                        val changedFormat = codec.outputFormat
-                        videoTrackIndex = muxer.addTrack(changedFormat)
+                        videoTrackIndex = muxer.addTrack(codec.outputFormat)
                         muxer.start()
                     }
-                    outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
-                    continue
                 }
+                index >= 0 -> {
+                    if (videoTrackIndex < 0) {
+                        videoTrackIndex = muxer.addTrack(codec.outputFormat)
+                        muxer.start()
+                    }
 
-                if (videoTrackIndex < 0) {
-                    val format = codec.outputFormat
-                    videoTrackIndex = muxer.addTrack(format)
-                    muxer.start()
+                    val outputBuffer = codec.getOutputBuffer(index)
+                    if (outputBuffer != null && bufferInfo.size > 0) {
+                        outputBuffer.position(bufferInfo.offset)
+                        outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
+                        muxer.writeSampleData(videoTrackIndex, outputBuffer, bufferInfo)
+                    }
+
+                    codec.releaseOutputBuffer(index, false)
+
+                    if (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) {
+                        return
+                    }
                 }
-
-                val outputBuffer = codec.getOutputBuffer(outputBufferIndex)
-                if (outputBuffer != null) {
-                    outputBuffer.position(bufferInfo.offset)
-                    outputBuffer.limit(bufferInfo.offset + bufferInfo.size)
-                    muxer.writeSampleData(videoTrackIndex, outputBuffer, bufferInfo)
-                }
-
-                codec.releaseOutputBuffer(outputBufferIndex, false)
-                outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 0)
+                else -> return
             }
-
-            result.success(true)
-        } catch (e: Exception) {
-            Log.e(TAG, "Error pushing frame", e)
-            result.error("PUSH_ERROR", "Failed to push frame: ${e.message}", null)
         }
     }
 
@@ -351,6 +390,57 @@ class FlutterWidgetRecorderPlugin: FlutterPlugin, MethodCallHandler {
             return
         }
 
+        isRecording.set(false)
+
+        val handler = encoderHandler
+        if (handler == null) {
+            finalizeAndRespond(result)
+            return
+        }
+
+        handler.post {
+            try {
+                val codec = mediaCodec
+                val muxer = mediaMuxer
+
+                if (codec != null && muxer != null) {
+                    val eosIndex = codec.dequeueInputBuffer(10000)
+                    if (eosIndex >= 0) {
+                        codec.queueInputBuffer(
+                            eosIndex, 0, 0, 0,
+                            MediaCodec.BUFFER_FLAG_END_OF_STREAM,
+                        )
+                    }
+                    drainOutputBuffers(codec, muxer, true)
+
+                    codec.stop()
+                    codec.release()
+                    mediaCodec = null
+
+                    try {
+                        muxer.stop()
+                    } finally {
+                        muxer.release()
+                        mediaMuxer = null
+                    }
+                }
+
+                val path = outputFile?.absolutePath
+                mainHandler.post {
+                    result.success(path)
+                    cleanupState()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error stopping recording", e)
+                mainHandler.post {
+                    result.error("STOP_ERROR", "Failed to stop recording: ${e.message}", null)
+                    cleanupState()
+                }
+            }
+        }
+    }
+
+    private fun finalizeAndRespond(result: Result) {
         try {
             val codec = mediaCodec
             val muxer = mediaMuxer
@@ -368,14 +458,25 @@ class FlutterWidgetRecorderPlugin: FlutterPlugin, MethodCallHandler {
                 }
             }
 
-            isRecording.set(false)
             result.success(outputFile?.absolutePath)
         } catch (e: Exception) {
             Log.e(TAG, "Error stopping recording", e)
             result.error("STOP_ERROR", "Failed to stop recording: ${e.message}", null)
         } finally {
-            cleanup()
+            cleanupState()
         }
+    }
+
+    private fun cleanupState() {
+        videoTrackIndex = -1
+        firstTimestamp = 0
+        effectiveEncoderConfig = null
+        nv12Buffer = null
+        isProcessingFrame.set(false)
+
+        encoderThread?.quitSafely()
+        encoderThread = null
+        encoderHandler = null
     }
 
     private fun cleanup() {
@@ -383,41 +484,46 @@ class FlutterWidgetRecorderPlugin: FlutterPlugin, MethodCallHandler {
         mediaCodec = null
         mediaMuxer?.release()
         mediaMuxer = null
-        videoTrackIndex = -1
-        firstTimestamp = 0
-        effectiveEncoderConfig = null
         isRecording.set(false)
+        cleanupState()
     }
 
-    private fun convertRGBAtoNV12(rgba: ByteArray, width: Int, height: Int): ByteArray {
-        val ySize = width * height
-        val uvSize = (width * height) / 4
-        val nv12 = ByteArray(ySize + 2 * uvSize)
-        
-        var yIndex = 0
-        var uvIndex = ySize
-        
-        for (j in 0 until height) {
-            for (i in 0 until width) {
-                val rgbIndex = (j * width + i) * 4
-                val r = rgba[rgbIndex].toInt() and 0xff
-                val g = rgba[rgbIndex + 1].toInt() and 0xff
-                val b = rgba[rgbIndex + 2].toInt() and 0xff
+    /**
+     * Converts RGBA pixel data to NV12 (YUV420 semi-planar) using BT.601 full-range
+     * fixed-point integer arithmetic. Handles stride alignment when frame dimensions
+     * don't match encoder-aligned dimensions.
+     */
+    private fun convertRGBAtoNV12(
+        rgba: ByteArray,
+        width: Int,
+        height: Int,
+        stride: Int,
+        alignedHeight: Int,
+        nv12: ByteArray,
+    ) {
+        val yPlaneSize = stride * alignedHeight
 
-                nv12[yIndex++] = ((0.299 * r + 0.587 * g + 0.114 * b).toInt()).toByte()
+        for (j in 0 until height) {
+            val yRowStart = j * stride
+            val rgbaRowStart = j * width * 4
+
+            for (i in 0 until width) {
+                val rgbIdx = rgbaRowStart + i * 4
+                val r = rgba[rgbIdx].toInt() and 0xff
+                val g = rgba[rgbIdx + 1].toInt() and 0xff
+                val b = rgba[rgbIdx + 2].toInt() and 0xff
+
+                nv12[yRowStart + i] = ((77 * r + 150 * g + 29 * b) shr 8).toByte()
 
                 if (j % 2 == 0 && i % 2 == 0) {
-                    val y = 0.299 * r + 0.587 * g + 0.114 * b
-                    val u = 128 + (0.492 * (b - y)).toInt()
-                    val v = 128 + (0.877 * (r - y)).toInt()
-
-                    nv12[uvIndex++] = u.coerceIn(0, 255).toByte()
-                    nv12[uvIndex++] = v.coerceIn(0, 255).toByte()
+                    val u = ((-43 * r - 85 * g + 128 * b) shr 8) + 128
+                    val v = ((128 * r - 107 * g - 21 * b) shr 8) + 128
+                    val uvIdx = yPlaneSize + (j / 2) * stride + i
+                    nv12[uvIdx] = u.coerceIn(0, 255).toByte()
+                    nv12[uvIdx + 1] = v.coerceIn(0, 255).toByte()
                 }
             }
         }
-
-        return nv12
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
