@@ -189,6 +189,7 @@ class FlutterWidgetRecorderPlugin: FlutterPlugin, MethodCallHandler {
 
             nv12Buffer = ByteArray(pixelWidth * pixelHeight * 3 / 2).also { buf ->
                 val yPlaneSize = pixelWidth * pixelHeight
+                buf.fill(16.toByte(), 0, yPlaneSize)
                 buf.fill(128.toByte(), yPlaneSize, buf.size)
             }
 
@@ -489,9 +490,10 @@ class FlutterWidgetRecorderPlugin: FlutterPlugin, MethodCallHandler {
     }
 
     /**
-     * Converts RGBA pixel data to NV12 (YUV420 semi-planar) using BT.601 full-range
-     * fixed-point integer arithmetic. Handles stride alignment when frame dimensions
-     * don't match encoder-aligned dimensions.
+     * Converts RGBA pixel data to NV12 (YUV420 semi-planar) using BT.601 limited-range
+     * (Y: 16-235, UV: 16-240) fixed-point integer arithmetic. This matches the iOS
+     * pipeline which uses kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange and the H.264
+     * default assumption of limited-range YUV.
      */
     private fun convertRGBAtoNV12(
         rgba: ByteArray,
@@ -513,14 +515,14 @@ class FlutterWidgetRecorderPlugin: FlutterPlugin, MethodCallHandler {
                 val g = rgba[rgbIdx + 1].toInt() and 0xff
                 val b = rgba[rgbIdx + 2].toInt() and 0xff
 
-                nv12[yRowStart + i] = ((77 * r + 150 * g + 29 * b) shr 8).toByte()
+                nv12[yRowStart + i] = (((66 * r + 129 * g + 25 * b + 128) shr 8) + 16).toByte()
 
                 if (j % 2 == 0 && i % 2 == 0) {
-                    val u = ((-43 * r - 85 * g + 128 * b) shr 8) + 128
-                    val v = ((128 * r - 107 * g - 21 * b) shr 8) + 128
+                    val u = ((-38 * r - 74 * g + 112 * b + 128) shr 8) + 128
+                    val v = ((112 * r - 94 * g - 18 * b + 128) shr 8) + 128
                     val uvIdx = yPlaneSize + (j / 2) * stride + i
-                    nv12[uvIdx] = u.coerceIn(0, 255).toByte()
-                    nv12[uvIdx + 1] = v.coerceIn(0, 255).toByte()
+                    nv12[uvIdx] = u.toByte()
+                    nv12[uvIdx + 1] = v.toByte()
                 }
             }
         }
